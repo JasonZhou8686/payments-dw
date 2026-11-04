@@ -1,0 +1,23 @@
+# Copy to ~/.dbt/profiles.yml (NOT into the repo) and edit project + keyfile.
+payments_dw:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      keyfile: /Users/jasonzhou/.gcp/dbt-runner.json
+      project: payments-dw
+      dataset: dbt_jason
+      threads: 4
+      location: US
+      job_execution_timeout_seconds: 300
+      priority: interactive
+    ci:
+      type: bigquery
+      method: service-account
+      keyfile: "{{ env_var('DBT_KEYFILE') }}"
+      project: "{{ env_var('GCP_PROJECT') }}"
+      dataset: dbt_ci
+      threads: 4
+      location: US
+      job_execution_timeout_seconds: 300

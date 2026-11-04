@@ -1,0 +1,5 @@
+dbt-core>=1.9,<2.0
+dbt-bigquery>=1.9,<2.0
+google-cloud-bigquery>=3.25
+pandas>=2.2
+faker>=30

@@ -1,0 +1,44 @@
+version: 2
+
+models:
+  - name: stg_payments__merchants
+    description: One row per merchant, current state. Light rename/cast of raw.merchants.
+    columns:
+      - name: merchant_id
+        description: Primary key. Stable identifier, e.g. m_00042.
+        tests: [unique, not_null]
+      - name: business_name
+        description: Legal/trading name.
+      - name: industry
+        description: Merchant category.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [restaurant, retail, salon, contractor, professional_services, ecommerce, fitness]
+      - name: plan
+        description: Subscription plan.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [starter, growth, enterprise]
+      - name: status
+        description: Lifecycle status.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [active, paused, churned, under_review]
+      - name: province
+        description: Canadian province of the business address.
+      - name: signup_date
+        description: Date the merchant account was created.
+        tests: [not_null]
+      - name: monthly_fee_cents
+        description: Plan fee in cents. Zero for starter.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: monthly_fee
+        description: Plan fee in dollars (NUMERIC).
+      - name: updated_at
+        description: Last change to this row in the source system (UTC).
