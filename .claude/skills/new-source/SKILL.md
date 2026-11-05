@@ -14,7 +14,9 @@ Create a complete, tested staging model for one raw table, following `CLAUDE.md`
 
 1. **Inspect the real schema.** Run:
    `bq show --schema --format=prettyjson $GCP_PROJECT:raw.<table>`
-   If `bq` is unavailable, ask the user to paste the schema from the BigQuery console. Never guess column names.
+   If `bq` is unavailable, query the schema through dbt instead:
+   `dbt show --inline "select column_name, data_type, is_nullable from {{ target.project }}.raw.INFORMATION_SCHEMA.COLUMNS where table_name = '<table>' order by ordinal_position" --limit 50`
+   Never guess column names. Note which columns are nullable — they must not get a `not_null` test.
 
 2. **Check the source entry.** Ensure `models/staging/payments/_payments__sources.yml` lists the table. Add it if missing,
    with `loaded_at_field` set to its timestamp column.
