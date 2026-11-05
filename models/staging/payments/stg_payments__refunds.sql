@@ -1,6 +1,6 @@
 with source as (
-    select *
-    from {{ source('payments', 'refunds') }}
+
+    select * from {{ source('payments', 'refunds') }}
 ),
 
 renamed as (

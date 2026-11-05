@@ -165,10 +165,69 @@ models:
               arguments:
                 min_value: 0
       - name: reason
-        description: Reason for the refund, free-form text.
+        description: Reason the merchant gave for the refund.
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: [duplicate, fraudulent, requested_by_customer]
+
+  - name: stg_payments__chargebacks
+    description: >
+      One row per chargeback (card dispute). Light rename/cast of raw.chargebacks.
+      Linked to the disputed transaction via transaction_id.
+    columns:
+      - name: chargeback_id
+        description: Primary key. Unique identifier of the chargeback.
+        tests: [unique, not_null]
+      - name: transaction_id
+        description: Disputed transaction. FK to stg_payments__transactions.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_payments__transactions')
+                field: transaction_id
+      - name: merchant_id
+        description: Merchant whose transaction was disputed. FK to stg_payments__merchants.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_payments__merchants')
+                field: merchant_id
+      - name: amount_cents
+        description: Disputed amount in cents. Never negative.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: amount
+        description: Disputed amount in dollars (NUMERIC).
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: reason_code
+        description: Reason the cardholder gave for the dispute.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [duplicate, fraud, not_as_described, product_not_received, other]
+      - name: status
+        description: Dispute outcome. pending until resolved, then won or lost (from the merchant's side).
+        tests:
+          - accepted_values:
+              arguments:
+                values: [pending, won, lost]
+      - name: opened_at
+        description: When the chargeback was opened (UTC). Source freshness field.
+        tests: [not_null]
+      - name: chargeback_date
+        description: Date the chargeback was opened, DATE(opened_at) in UTC.
+        tests: [not_null]
+      - name: resolved_at
+        description: >
+          When the chargeback was resolved (UTC). Null while unresolved. Note that some pending rows
+          already have a resolved_at in the source.
           
