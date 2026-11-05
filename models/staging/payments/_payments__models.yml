@@ -123,3 +123,52 @@ models:
         description: Repeated STRUCT of purchased items (sku, description, quantity, unit_price_cents). Not unnested in staging.
       - name: metadata_json
         description: Free-form JSON metadata from the source system, as a raw STRING.
+  - name: stg_payments__refunds
+    description: >
+      One row per refund. Light rename/cast of raw.refunds. Refunds are linked to transactions via transaction_id.
+    columns:
+      - name: refund_id
+        description: Primary key. Unique identifier of the refund.
+        tests: [unique, not_null]
+      - name: transaction_id
+        description: Transaction that was refunded. FK to stg_payments__transactions.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_payments__transactions')
+                field: transaction_id
+      - name: merchant_id
+        description: Merchant that processed the refund. FK to stg_payments__merchants.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_payments__merchants')
+                field: merchant_id
+      - name: created_at
+        description: When the refund was created (UTC).
+        tests: [not_null]
+      - name: refund_date
+        description: Date the refund was created, DATE(created_at) in UTC.
+        tests: [not_null]
+      - name: amount_cents
+        description: Refund amount in cents. Never negative. May be partial - less than the original transaction amount.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: amount
+        description: Refund amount in dollars (NUMERIC).
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: reason
+        description: Reason for the refund, free-form text.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [duplicate, fraudulent, requested_by_customer]
+          
