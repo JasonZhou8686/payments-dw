@@ -42,3 +42,84 @@ models:
         description: Plan fee in dollars (NUMERIC).
       - name: updated_at
         description: Last change to this row in the source system (UTC).
+
+  - name: stg_payments__transactions
+    description: >
+      One row per card transaction. Light rename/cast of raw.transactions. Card fields are flattened
+      for filtering; the repeated `line_items` array is kept as-is (not unnested) to preserve the grain.
+    columns:
+      - name: transaction_id
+        description: Primary key. Unique identifier of the transaction.
+        tests: [unique, not_null]
+      - name: merchant_id
+        description: Merchant that processed the transaction. FK to stg_payments__merchants.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_payments__merchants')
+                field: merchant_id
+      - name: created_at
+        description: When the transaction was created (UTC).
+        tests: [not_null]
+      - name: transaction_date
+        description: Date the transaction was created, DATE(created_at) in UTC.
+        tests: [not_null]
+      - name: amount_cents
+        description: Transaction amount in cents. Never negative; refunds live in raw.refunds.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: amount
+        description: Transaction amount in dollars (NUMERIC).
+      - name: fee_cents
+        description: Processing fee charged to the merchant, in cents. Never negative.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: fee
+        description: Processing fee in dollars (NUMERIC).
+      - name: currency
+        description: ISO 4217 currency code. Only CAD observed so far; the accepted_values test is intentionally strict and will fail on the first non-CAD transaction so we notice the change.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [CAD]
+      - name: status
+        description: Authorization outcome.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [approved, declined, error]
+      - name: channel
+        description: How the payment was taken.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [card_present, online, invoice]
+      - name: card
+        description: Original card STRUCT (brand, last4, funding, country), kept for completeness.
+      - name: card_brand
+        description: Card network, flattened from card.brand.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [visa, mastercard, amex, discover]
+      - name: card_funding
+        description: Card funding type, flattened from card.funding.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [credit, debit, prepaid]
+      - name: card_country
+        description: ISO country code of the card issuer, flattened from card.country.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [CA, US, GB]
+      - name: line_items
+        description: Repeated STRUCT of purchased items (sku, description, quantity, unit_price_cents). Not unnested in staging.
+      - name: metadata_json
+        description: Free-form JSON metadata from the source system, as a raw STRING.

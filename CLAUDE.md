@@ -8,7 +8,7 @@ truth for how this project is built. Humans follow it too.
 - Warehouse: Google BigQuery, location `US`. Raw data lands in dataset `raw`.
 - Transformation: dbt Core with `dbt-bigquery`. Dev target writes to `dbt_jason`, CI to `dbt_ci`.
 - Packages: `dbt_utils`, `dbt_expectations` (see `packages.yml`). Run `dbt deps` after cloning.
-- Python 3.11 in `.venv`. Activate it before any `dbt` or `python` command.
+- Python 3.12 in `.venv`. Activate it before any `dbt` or `python` command.
 - Credentials: `~/.dbt/profiles.yml` and `~/.gcp/*.json`. Never read, print, copy or commit them.
 
 ## Layering (strict)
