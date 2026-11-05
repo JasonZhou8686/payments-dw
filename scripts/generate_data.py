@@ -226,7 +226,7 @@ def gen_transactions(merchants, start: datetime, days: int, avg_per_merchant_day
                                 "merchant_id": m["merchant_id"],
                                 "amount_cents": amount,
                                 "reason_code": random.choice(CHARGEBACK_REASONS),
-                                "status": weighted({"won": 0.4, "lost": 0.3, "pending": 0.3}) if resolved else "pending",
+                                "status": weighted({"won": 0.55, "lost": 0.45}) if resolved else "pending",
                                 "opened_at": ts(opened),
                                 "resolved_at": ts(opened + timedelta(days=random.randint(10, 45))) if resolved else None,
                             }

@@ -176,6 +176,10 @@ models:
     description: >
       One row per chargeback (card dispute). Light rename/cast of raw.chargebacks.
       Linked to the disputed transaction via transaction_id.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "(status = 'pending') = (resolved_at is null)"
     columns:
       - name: chargeback_id
         description: Primary key. Unique identifier of the chargeback.
@@ -227,9 +231,7 @@ models:
         description: Date the chargeback was opened, DATE(opened_at) in UTC.
         tests: [not_null]
       - name: resolved_at
-        description: >
-          When the chargeback was resolved (UTC). Null while unresolved. Note that some pending rows
-          already have a resolved_at in the source.
+        description: When the chargeback was resolved (UTC). Null while unresolved (status = pending).
 
   - name: stg_payments__payouts
     description: >
