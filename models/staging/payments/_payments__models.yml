@@ -230,4 +230,72 @@ models:
         description: >
           When the chargeback was resolved (UTC). Null while unresolved. Note that some pending rows
           already have a resolved_at in the source.
+
+  - name: stg_payments__payouts
+    description: >
+      One row per merchant settlement (daily payout). Light rename/cast of raw.payouts.
+      net = gross - fees - refunds.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "net_cents = gross_cents - fees_cents - refunds_cents"
+    columns:
+      - name: payout_id
+        description: Primary key. Unique identifier of the payout.
+        tests: [unique, not_null]
+      - name: merchant_id
+        description: Merchant being paid out. FK to stg_payments__merchants.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_payments__merchants')
+                field: merchant_id
+      - name: payout_date
+        description: Settlement date the payout covers (from the source; not derived from created_at).
+        tests: [not_null]
+      - name: gross_cents
+        description: Total transaction volume settled in this payout, in cents. Never negative.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: gross
+        description: Gross settled volume in dollars (NUMERIC).
+      - name: fees_cents
+        description: Processing fees deducted, in cents. Never negative.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: fees
+        description: Fees deducted in dollars (NUMERIC).
+      - name: refunds_cents
+        description: Refunds deducted, in cents. Never negative.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: refunds
+        description: Refunds deducted in dollars (NUMERIC).
+      - name: net_cents
+        description: >
+          Amount paid to the merchant, in cents (gross - fees - refunds). Can be negative when refunds
+          and fees exceed gross volume for the day, so it has no min_value test.
+        tests: [not_null]
+      - name: net
+        description: Net payout in dollars (NUMERIC). Can be negative, see net_cents.
+      - name: status
+        description: Payout state.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [pending, paid, failed]
+      - name: created_at
+        description: When the payout record was created (UTC). Source freshness field.
+        tests: [not_null]
           
