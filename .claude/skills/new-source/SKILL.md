@@ -16,7 +16,8 @@ Create a complete, tested staging model for one raw table, following `CLAUDE.md`
    `bq show --schema --format=prettyjson $GCP_PROJECT:raw.<table>`
    If `bq` is unavailable, query the schema through dbt instead:
    `dbt show --inline "select column_name, data_type, is_nullable from {{ target.project }}.raw.INFORMATION_SCHEMA.COLUMNS where table_name = '<table>' order by ordinal_position" --limit 50`
-   Never guess column names. Note which columns are nullable — they must not get a `not_null` test.
+   Never guess column names. Don't use the schema's `is_nullable` to decide on `not_null` tests: `NULLABLE`
+   is the BigQuery loader default and says nothing about the data (see step 4).
 
 2. **Check the source entry.** Ensure `models/staging/payments/_payments__sources.yml` lists the table. Add it if missing,
    with `loaded_at_field` set to its timestamp column.
@@ -36,6 +37,10 @@ Create a complete, tested staging model for one raw table, following `CLAUDE.md`
      `bq query --nouse_legacy_sql 'select distinct <col> from raw.<table>'`.
    - Money columns: `dbt_expectations.expect_column_values_to_be_between` with `min_value: 0`.
    - FK columns (`merchant_id`, `transaction_id`): `relationships` to the matching staging model if it exists.
+   - `not_null`: decide from what the column means plus the observed null count, not from the schema mode.
+     Add it to FKs, creation/event timestamps and dates, and any column that must always be present, when the
+     data has zero nulls. Skip it on columns that are null by design (e.g. `resolved_at` while unresolved) and
+     say so in the description. If a must-have column has nulls today, report it instead of adding a failing test.
 
 5. **Build and verify.** `dbt build --select stg_payments__<table>`. Fix any failure. Then run
    `dbt show --select stg_payments__<table> --limit 5` and sanity-check the output.
