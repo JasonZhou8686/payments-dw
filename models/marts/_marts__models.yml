@@ -1,0 +1,81 @@
+version: 2
+
+models:
+  - name: dim_merchants
+    description: >
+      One row per merchant: current attributes, lifetime activity from approved transactions only (declined/error excluded). FK to `stg_payments__merchants.merchant_id`.
+      Every merchant appears, including those with no approved transactions (in which case lifetime activity fields are NULL).
+    tests:
+      - dbt_expectations.expect_table_row_count_to_equal_other_table:
+          arguments:
+            compare_model: ref('stg_payments__merchants')
+    columns:
+      - name: merchant_id
+        description: The merchant's unique identifier; primary key for this table, FK to `stg_payments__merchants.merchant_id`.
+        tests: 
+          - unique
+          - not_null
+          - relationships:
+              to: ref('stg_payments__merchants')
+              field: merchant_id
+      - name: business_name
+        description: The merchant's business name, as provided by the merchant.
+      - name: industry
+        description: The merchant's industry, as provided by the merchant.
+        tests:
+          - accepted_values:
+              values: ['restaurant', 'retail', 'salon', 'contractor', 'professional_services', 'ecommerce', 'fitness']
+      - name: plan
+        description: current subscription plan for the merchant.
+        tests:
+          - accepted_values:
+              values: ['starter', 'growth', 'enterprise']
+      - name: status
+        description: current lifecycle status for the merchant.
+        tests:
+          - accepted_values:
+              values: ['active', 'paused', 'churned', 'under_review']
+      - name: is_active
+        description: True when status is 'active', false otherwise.
+        tests: [not_null]
+      - name: province
+        description: The merchant's province, as provided by the merchant.
+      - name: signup_date
+        description: Date the merchant account was created (UTC).
+        tests:
+          - not_null
+      - name: tenure_days
+        description: >
+          Days from signup_date to the date the table was built. Changes on every rebuild, so it is not reproducible for a past date.
+      - name: monthly_fee_cents
+        description: Monthly subscription fee for the merchant, in cents.
+      - name: monthly_fee_currency
+        description: Currency of the monthly subscription fee in dollars for the merchant. (NUMERIC)
+      - name: has_transacted
+        description: True when the merchant has at least one approved transaction, false otherwise.
+        tests: [not_null]
+      - name: first_transaction_date
+        description: Date of the merchant's first approved transaction (UTC).
+      - name: last_transaction_date
+        description: Date of the merchant's most recent approved transaction. Null if has_transacted is false.
+      - name: lifetime_transaction_count
+        description: Total number of approved transactions for this merchant, all time. 0 (not null) for merchants that never transacted.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: lifetime_gross_volume_cents
+        description: Total gross volume (sum of `amount_cents`) for this merchant, in cents. 0 for merchants that never transacted.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: lifetime_fee_cents
+        description: Total fees (sum of `fee_cents`) earned from this merchant. Our revenue from them, in cents.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
