@@ -79,3 +79,80 @@ models:
           - dbt_expectations.expect_column_values_to_be_between:
               arguments:
                 min_value: 0
+  - name: fct_transactions
+    description: >
+      One row per card transaction, all statuses. Incremental (insert_overwrite) partitioned by
+      transaction_date and clustered by merchant_id. Each run reprocesses the trailing 14 days to
+      pick up late refunds (refunds arrive up to ~14 days after the transaction). Chargebacks can
+      arrive up to ~60 days later and are NOT reflected here. Refund totals are joined inline
+      (only this model needs them); promote to an intermediate model if reused.
+      Run with --full-refresh after schema changes.
+    tests:
+      - dbt_expectations.expect_table_row_count_to_equal_other_table:
+          arguments:
+            compare_model: ref('stg_payments__transactions')
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "refunded_amount_cents <= amount_cents"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "net_amount_cents = amount_cents - refunded_amount_cents"
+    columns:
+      - name: transaction_id
+        description: The transaction's unique identifier; primary key for this table, FK to `stg_payments__transactions.transaction_id`.
+        tests: 
+          - unique
+          - not_null
+      - name: merchant_id
+        description: The merchant's unique identifier; FK to `dim_merchants.merchant_id`.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_merchants')
+              field: merchant_id
+      - name: transaction_date
+        description: Date of the transaction (UTC). Derived from `created_at` timestamp.
+        tests:
+          - not_null
+      - name: created_at
+        description: Timestamp when the transaction was created (UTC).
+        tests:
+          - not_null
+      - name: status
+        description: Transaction status, as provided by the processor.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['approved', 'declined', 'error']
+      - name: is_approved
+        description: True when status is 'approved', false otherwise.
+        tests: [not_null]
+      - name: channel
+        description: How the payment was taken.
+      - name: currency
+        description: ISO 4217 currency code for the transaction amount.
+      - name: card_brand
+        description: Card network, as provided by the processor.
+      - name: card_funding
+        description: Credit, debit or prepaid, as provided by the processor.
+      - name: card_country
+        description: Country of the card, as provided by the processor.
+      - name: amount_cents
+        description: Transaction amount in cents.
+        tests:
+          - not_null
+      - name: fee_cents
+        description: Fee charged for the transaction, in cents. 0 for non-approved transactions (declined/error).
+        tests:
+          - not_null
+      - name: refunded_amount_cents
+        description: Total amount refunded for the transaction, in cents. 0 for non-approved transactions
+        tests:
+          - not_null
+      - name: is_refunded
+        description: True when refunded_amount_cents > 0, false otherwise.
+        tests: [not_null]
+      - name: net_amount_cents
+        description: amount_cents - refunded_amount_cents.
+        tests:
+          - not_null
