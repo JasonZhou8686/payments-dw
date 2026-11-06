@@ -1,17 +1,9 @@
 with transactions as (
     select
-        transaction_id
-        , merchant_id
+        merchant_id
+        , transaction_date
         , amount_cents
         , fee_cents
-        , transaction_date
-        , currency
-        , status
-        , channel
-        , card_brand
-        , card_funding
-        , card_country 
-        , line_items
     from {{ ref('stg_payments__transactions') }}
     where status = 'approved'
 
