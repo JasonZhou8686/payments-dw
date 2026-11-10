@@ -1,4 +1,4 @@
-# Spec: `merchant_daily_revenue`
+# Spec: `fct_merchant_daily_revenue`
 
 Status: ready · Owner: Jason · Layer: marts · Version: v1
 
@@ -14,7 +14,7 @@ chargeback. A merchant can have refunds or chargebacks on a day with no sales, s
 - `fct_transactions` — approved only (`is_approved`), dated by `transaction_date`
 - `stg_payments__refunds` — dated by `refund_date` (the day the refund was created)
 - `stg_payments__chargebacks` — dated by `chargeback_date` (the day it was opened)
-- `dim_merchants` — `plan` and `industry`, current values (not as-of)
+- `dim_merchants` — `plan` and `industry`, value at the time the partition is built; not updated later
 
 ## Build approach
 1. Aggregate each event source to `(merchant_id, activity_date)` separately: transactions, refunds, chargebacks.
@@ -31,8 +31,8 @@ sales.
 | merchant_daily_id | STRING | surrogate key: `{{ dbt_utils.generate_surrogate_key(['merchant_id','activity_date']) }}` |
 | merchant_id | STRING | FK → dim_merchants |
 | activity_date | DATE | partition column; UTC calendar day |
-| plan | STRING | from dim_merchants (current) |
-| industry | STRING | from dim_merchants (current) |
+| plan | STRING | from dim_merchants, as of when the partition was last built |
+| industry | STRING | from dim_merchants, as of when the partition was last built |
 | transaction_count | INT64 | approved transactions that day; 0 if none |
 | gross_volume_cents | INT64 | sum of approved `amount_cents`; 0 if none |
 | fee_revenue_cents | INT64 | sum of `fee_cents` on approved transactions — this is *our* revenue; 0 if none |
@@ -46,7 +46,8 @@ sales.
 Money is stored in cents (INT64) to match `fct_transactions`; dollars belong in the BI layer.
 
 ## Config
-Incremental, `insert_overwrite`, partition by `activity_date`, cluster by `merchant_id`. Filter each source on <its date column> >= date_sub(_dbt_max_partition, interval 3 day)
+Incremental, `insert_overwrite`, partition by `activity_date`, cluster by `merchant_id`, `on_schema_change='fail'`.
+Filter each source on `<its date column> >= date_sub(_dbt_max_partition, interval 3 day)`.
 
 Why 3 days and not 14 like `fct_transactions`: here refunds and chargebacks are attributed to the day they were
 *created/opened*, not to the original transaction's day. A refund created today lands in today's partition, so old
@@ -65,6 +66,8 @@ arriving late). Apply the same window to all three source CTEs, each filtered on
   - `fee_revenue_cents <= gross_volume_cents`
   - `net_volume_cents = gross_volume_cents - refund_amount_cents - chargeback_amount_cents`
   - `transaction_count + refund_count + chargeback_count > 0` (every row has at least one event — guards the grain)
+- `avg_ticket_cents` `>= 0` (nulls allowed)
+- `accepted_values` on `plan` and `industry`, same values as `dim_merchants` (CLAUDE.md standard)
 - Reconciliation (check once, manually): `sum(transaction_count)` equals approved rows in `fct_transactions`;
   `sum(refund_amount_cents)` equals total refunds in staging; `sum(chargeback_count)` equals rows in
   `stg_payments__chargebacks`.
@@ -74,7 +77,7 @@ After reloading raw data (e.g. re-running the generator), run `dbt build --full-
 
 ## Out of scope for v1
 - Day-over-day row-count stability check (< 50% of 7-day median) — not a built-in test; future singular test.
-- As-of `plan`/`industry` using `merchants_snapshot` instead of current values — decide before v2.
+- As-of `plan`/`industry` using `merchants_snapshot`, or dropping them from this table and joining `dim_merchants` at query time. v1 keeps the value from when the partition was built.
 - merchant-local days
 - Enforcing partition filters (`require_partition_filter=true`) - would make dbt's own full-table tests fail.
 
