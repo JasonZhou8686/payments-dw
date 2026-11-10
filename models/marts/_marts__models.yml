@@ -156,3 +156,123 @@ models:
         description: amount_cents - refunded_amount_cents.
         tests:
           - not_null
+
+  - name: fct_merchant_daily_revenue
+    description: >
+      One row per merchant per UTC day (merchant_id, activity_date) summarising money movement, for the
+      merchant-health dashboard and as a churn-model feature table. A row exists only for days with at least
+      one approved transaction, refund or chargeback; days with refunds or chargebacks but no sales are included.
+      Refunds are dated by when they were created and chargebacks by when they were opened, not by the original
+      transaction's day. Chargebacks are deducted when opened regardless of outcome, so net_volume_cents is
+      exposure, not final settlement. plan and industry are the values at the time the partition was last built;
+      they are not updated if the merchant changes later. Join dim_merchants on merchant_id for current values.
+      Incremental (insert_overwrite) partitioned by activity_date, clustered by merchant_id; each run reprocesses
+      the last 3 days to cover load delay. Filter on activity_date to keep queries cheap.
+      After reloading raw data, run dbt build --full-refresh --select fct_transactions+.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [merchant_id, activity_date]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "fee_revenue_cents <= gross_volume_cents"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "net_volume_cents = gross_volume_cents - refund_amount_cents - chargeback_amount_cents"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "transaction_count + refund_count + chargeback_count > 0"
+    columns:
+      - name: merchant_daily_id
+        description: Primary key. Surrogate key of merchant_id and activity_date.
+        tests: [unique, not_null]
+      - name: merchant_id
+        description: The merchant's unique identifier; FK to `dim_merchants.merchant_id`.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_merchants')
+                field: merchant_id
+      - name: activity_date
+        description: UTC calendar day of the activity. Partition column.
+        tests: [not_null]
+      - name: plan
+        description: >
+          Merchant's subscription plan from dim_merchants, as of the time the partition was last built. Not updated
+          if the merchant changes later; join dim_merchants on merchant_id for the current value.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['starter', 'growth', 'enterprise']
+      - name: industry
+        description: >
+          Merchant's industry from dim_merchants, as of the time the partition was last built. Not updated
+          if the merchant changes later; join dim_merchants on merchant_id for the current value.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['restaurant', 'retail', 'salon', 'contractor', 'professional_services', 'ecommerce', 'fitness']
+      - name: transaction_count
+        description: Number of approved transactions that day. 0 if none.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: gross_volume_cents
+        description: Sum of amount_cents on approved transactions that day, in cents. 0 if none.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: fee_revenue_cents
+        description: Sum of fee_cents on approved transactions that day, in cents. This is our revenue. 0 if none.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: refund_count
+        description: Number of refunds created that day (any original transaction date). 0 if none.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: refund_amount_cents
+        description: Sum of refunds created that day, in cents. 0 if none.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: chargeback_count
+        description: Number of chargebacks opened that day, whatever their outcome. 0 if none.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: chargeback_amount_cents
+        description: Sum of chargeback amounts opened that day, in cents, whatever their outcome. 0 if none.
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+      - name: net_volume_cents
+        description: >
+          gross_volume_cents - refund_amount_cents - chargeback_amount_cents, in cents. Can be negative (refunds or
+          chargebacks on a day with little or no sales), so it has no >= 0 test. Chargebacks are deducted when opened,
+          regardless of outcome: this is exposure, not final settlement.
+        tests: [not_null]
+      - name: avg_ticket_cents
+        description: >
+          Average approved transaction amount that day, in cents (NUMERIC, 2 decimals, so can be fractional cents):
+          gross_volume_cents / transaction_count. Null when transaction_count = 0.
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
