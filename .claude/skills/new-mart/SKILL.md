@@ -7,7 +7,7 @@ description: Build a complete, tested dbt mart from a spec file in specs/ — ch
 Build a complete, tested mart model from a spec file in `specs/`. The spec defines *what* to build: grain, columns, tests, and business rules. `CLAUDE.md` defines *how* to build it: SQL style, layering, naming, and test standards. Follow both exactly. If the spec is ambiguous, incomplete, or conflicts with `CLAUDE.md`, stop and ask the user for clarification. Do not fill gaps with guesses, and do not edit the spec.
 
 ## Inputs
-- `spec`: path to a spec file in `specs/` (e.g. `specs/merchant_daily_revenue.md`). If no path is given or the file doesn't exist, list the files in `specs/` and ask which one to use. If there is no suitable spec, stop and ask the user to create one before proceeding.
+- `spec`: path to a spec file in `specs/` (e.g. `specs/fct_merchant_daily_revenue.md`). If no path is given or the file doesn't exist, list the files in `specs/` and ask which one to use. If there is no suitable spec, stop and ask the user to create one before proceeding.
 
 ## Steps
 
@@ -18,12 +18,13 @@ Build a complete, tested mart model from a spec file in `specs/`. The spec defin
     - a definition can be read more than one way (e.g. a time window without a reference point - "trailing 3 days" from today, or from the last partition);
     - a column's definition, type or test contradicts another part of the spec or `CLAUDE.md`;
     - an input model named in the spec does not exist yet.
+    - the model name doesn't follow the `CLAUDE.md` prefix rule for its layer (`fct_` / `dim_`)
   - Items under "Out of scope" or "Future work" are not required for this build. Don't add them.
   - Never edit the spec. If it needs a change, say what and why, and wait.
 
 2. **Inspect the inputs** Before writing any SQL, inspect the real schema of every input model and column named in the spec. Never guess column names or types. 
-  - For each input model in the spec, list its columns by running:
-    `dbt show --inline "select * from {{ ref('<model>') }}" --limit 1`
+  - For each input model in the spec, list its columns and types:
+    `dbt show --inline "select column_name, data_type from {{ ref('<model>').database }}.{{ ref('<model>').schema }}.INFORMATION_SCHEMA.COLUMNS where table_name = '<model>' order by ordinal_position" --limit 60`
   - Check that every column the spec references (keys, date columns, amounts, flags) is present, with the expected meaning: dates are DATE, money is INT64 cents, flags are booleans, etc. If any are missing or different, stop and ask the user to clarify the spec.
   - If a model is missing, or a column is missing, stop and report it, do not rename things to make the SQL fit, and do not change upstream models.
   - Note each input's date column; step 3 uses it for the incremental filter.
@@ -42,17 +43,17 @@ Build a complete, tested mart model from a spec file in `specs/`. The spec defin
   - Append the new model, do not modify or reorder existing entries in the file.
   - Model description: purpose, grain, and the "why" from the spec - Window rationale, caveats, anything an analyst could misread (e.g. "chargebacks deducted when opened, not final"). 
   - Describe every column, in the same order as the SQL. Descriptions must match the spec and the data.
-  - Add exactly the tests the spec lists - no more, no fewer. Test parameters go under `arguments:`, model-level tests go under the model, beside `columns:` not under a column.
+  - Add the tests the spec lists, plus the tests `CLAUDE.md` requires for every model. If the two contradict each other, stop and ask. Don't add anything beyond those.
   - Use only test names that exist in dbt core, `dbt_utils` or `dbt_expectations`. If unsure, check the package in `dbt_packages/` rather than guessing.
   - Run `dbt parse` and fix any errors before building.
 
 5. **Build and verify**
   - `dbt run --select <model_name>`. If it fails on a schema change because an earlier version of the table exists, rerun with `--full-refresh` for this model only.
-  - `dbt show --select <model_name> --limit 10`. Sanity-check the values against the spec definitions.
+  - Preview the built table: `dbt show --inline "select * from {{ ref('<model_name>') }}" --limit 10`. (`dbt show --select` fails on incremental models that use `_dbt_max_partition`. Always use `--limit`, never `limit` inside the SQL.) Sanity-check the values against the spec definitions.
   - `dbt build --select <model_name>` to rebuild and run all tests.
   - Incremental models: run `dbt run --select <model_name>` a second time and confirm it reports `SCRIPT` (incremental), not `CREATE TABLE`. Note bytes processed for both runs.
   - Run each reconciliation check from the spec as a read-only query with `dbt show --inline`, and record the expected and actual numbers.
-  - If any test fails or a reconciliation doesn't match: show the failing rows (`dbt show --select <test_name>`) and stop. Do not change tests, thresholds, the spec or the SQL to make it pass
+  - If any test fails or a reconciliation doesn't match: show the failing rows (`dbt show --select <test_name>`) and stop. Do not change tests, thresholds, the spec or the SQL to make it pass. Report and ask.
 
 6. **Report** in this format, nothing else:
   - Files: created/changed
@@ -68,4 +69,5 @@ Build a complete, tested mart model from a spec file in `specs/`. The spec defin
 - Remove, rename or reorder existing entries in YAML files.
 - Loosen, delete or skip a failing test.
 - Build anything listed under "Out of scope".
-- Commit, push, or run `--full-refresh` on any model other than the one being built.
+- Commit or push.
+- Run `--full-refresh` on any model other than the one being built.
