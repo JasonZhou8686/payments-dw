@@ -47,6 +47,10 @@ models:
     description: >
       One row per card transaction. Light rename/cast of raw.transactions. Card fields are flattened
       for filtering; the repeated `line_items` array is kept as-is (not unnested) to preserve the grain.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "transaction_date <= current_date()"
     columns:
       - name: transaction_id
         description: Primary key. Unique identifier of the transaction.
@@ -126,6 +130,10 @@ models:
   - name: stg_payments__refunds
     description: >
       One row per refund. Light rename/cast of raw.refunds. Refunds are linked to transactions via transaction_id.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "refund_date <= current_date()"
     columns:
       - name: refund_id
         description: Primary key. Unique identifier of the refund.
@@ -180,6 +188,9 @@ models:
       - dbt_utils.expression_is_true:
           arguments:
             expression: "(status = 'pending') = (resolved_at is null)"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "chargeback_date <= current_date()"
     columns:
       - name: chargeback_id
         description: Primary key. Unique identifier of the chargeback.

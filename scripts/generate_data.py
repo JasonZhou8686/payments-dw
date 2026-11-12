@@ -160,6 +160,7 @@ def gen_merchants(n: int, start: datetime, end: datetime, day_offset: int):
 
 def gen_transactions(merchants, start: datetime, days: int, avg_per_merchant_day: float):
     txns, refunds, chargebacks = [], [], []
+    as_of = start + timedelta(days=days)  # snapshot time: nothing may be dated on or after this
     active = [m for m in merchants if m["status"] in ("active", "paused")]
     for d in range(days):
         day = start + timedelta(days=d)
@@ -206,31 +207,35 @@ def gen_transactions(merchants, start: datetime, days: int, avg_per_merchant_day
                 txns.append(t)
                 if status == "approved":
                     if random.random() < 0.03:
-                        refunds.append(
-                            {
-                                "refund_id": f"rf_{uuid.uuid4().hex[:12]}",
-                                "transaction_id": t["transaction_id"],
-                                "merchant_id": m["merchant_id"],
-                                "amount_cents": amount if random.random() < 0.8 else amount // 2,
-                                "reason": random.choice(["requested_by_customer", "duplicate", "fraudulent"]),
-                                "created_at": ts(created + timedelta(days=random.randint(0, 14))),
-                            }
-                        )
+                        refunded = created + timedelta(days=random.randint(0, 14))
+                        if refunded < as_of:
+                            refunds.append(
+                                {
+                                    "refund_id": f"rf_{uuid.uuid4().hex[:12]}",
+                                    "transaction_id": t["transaction_id"],
+                                    "merchant_id": m["merchant_id"],
+                                    "amount_cents": amount if random.random() < 0.8 else amount // 2,
+                                    "reason": random.choice(["requested_by_customer", "duplicate", "fraudulent"]),
+                                    "created_at": ts(refunded),
+                                }
+                            )
                     if random.random() < 0.006:
                         opened = created + timedelta(days=random.randint(5, 60))
-                        resolved = random.random() < 0.7
-                        chargebacks.append(
-                            {
-                                "chargeback_id": f"cb_{uuid.uuid4().hex[:12]}",
-                                "transaction_id": t["transaction_id"],
-                                "merchant_id": m["merchant_id"],
-                                "amount_cents": amount,
-                                "reason_code": random.choice(CHARGEBACK_REASONS),
-                                "status": weighted({"won": 0.55, "lost": 0.45}) if resolved else "pending",
-                                "opened_at": ts(opened),
-                                "resolved_at": ts(opened + timedelta(days=random.randint(10, 45))) if resolved else None,
-                            }
-                        )
+                        if opened < as_of:
+                            resolution = opened + timedelta(days=random.randint(10, 45))
+                            resolved = random.random() < 0.7 and resolution < as_of
+                            chargebacks.append(
+                                {
+                                    "chargeback_id": f"cb_{uuid.uuid4().hex[:12]}",
+                                    "transaction_id": t["transaction_id"],
+                                    "merchant_id": m["merchant_id"],
+                                    "amount_cents": amount,
+                                    "reason_code": random.choice(CHARGEBACK_REASONS),
+                                    "status": weighted({"won": 0.55, "lost": 0.45}) if resolved else "pending",
+                                    "opened_at": ts(opened),
+                                    "resolved_at": ts(resolution) if resolved else None,
+                                }
+                            )
     return txns, refunds, chargebacks
 
 
