@@ -135,3 +135,71 @@
 ### State at end of day
 - Staging 5 models, intermediate 1, marts 2 (`dim_merchants`, `fct_transactions`), ~108 tests, 4 PRs merged.
 - Next: fix the `merchant_daily_revenue` spec, write a `/new-mart` skill, build the mart with it.
+
+## Day 4 — 2026-11-07 to 2026-11-10: a spec, my first skill, and a mart built by the agent
+
+### What I built
+- Rewrote `specs/fct_merchant_daily_revenue.md` to v1, then wrote `.claude/skills/new-mart/SKILL.md`.
+- Ran `/new-mart` on the spec. It built `fct_merchant_daily_revenue`: one row per merchant per day, incremental,
+  3-day lookback, 27 tests. PR #5.
+
+### Specs
+- The first draft had real flaws: dollars where the fact stores cents, a `>= 0` test on a net column that can be
+  negative, "trailing 3 days" with no reference point, and a build that started from transactions and would have
+  dropped days with only a refund or chargeback.
+- The spine: aggregate each event source to (merchant, day), `union distinct` the keys, left join the aggregates.
+- The lookback window depends on which date an event is attributed to. A refund counted on the day it was created
+  never changes an old partition, so 3 days is enough here, while `fct_transactions` needs 14.
+- A column definition says what the column is. A reconciliation is a check. Keep them in separate sections.
+- Write down what is out of scope, or the agent will helpfully build it.
+- Still wrong after two reviews: `plan` and `industry` were called "current values", but an incremental table keeps
+  whatever value was there when the partition was built.
+
+### Writing a skill
+- Frontmatter `description` decides when the skill is used. Mine was still the copied `new-source` text at first.
+- Turn every question into an instruction with a concrete check. "What should make it stop?" is not an instruction.
+- The spec says what to build, `CLAUDE.md` says how. If they conflict, stop and ask. Never edit the spec.
+- "Append, don't modify existing entries" for shared YAML files. A wrong filename (`_marts_models.yml`) would have
+  made the agent write a second file.
+- Fixed report format, so every run is reviewed the same way.
+- Commit the skill before running it.
+
+### What the first run taught me
+- It stopped on a real conflict I had missed: the model name had no `fct_` prefix.
+- "Exactly the tests the spec lists" contradicted the tests `CLAUDE.md` requires. Rule is now: spec tests plus
+  `CLAUDE.md` tests, ask if they contradict.
+- It used `INFORMATION_SCHEMA` for column types instead of my `select * limit 1`. Better, so the skill says that now.
+- `dbt show --select` fails on an incremental model that uses `_dbt_max_partition`. Preview with `--inline` instead.
+- It reported done without making a correction I had asked for. Ask directly and read the diff.
+- Reconciled exactly: 136,653 approved transactions, 25,908,511 refund cents, 798 chargebacks.
+- It found 31 chargebacks dated in the future, which had moved the incremental window to late November.
+
+### Git
+- `git mv` stages the rename. `git restore --staged .` clears staging without losing work, so commits stay one
+  logical change each.
+- A push does not open a pull request. Merging does not delete the branch unless the repo setting is on.
+
+## Day 5 — 2026-11-11: honest data, and a CI failure
+
+### What I built
+- Generator fix: the data is a snapshot as of its end date. Refunds and chargebacks that would happen after it are
+  not generated, and a chargeback whose resolution would fall after it stays pending. PR #7, closes issue #6.
+- Three staging tests that fail on any future-dated row.
+- CI now runs `dbt build --full-refresh`.
+
+### Lessons
+- Dropping events that have not happened yet is more honest than capping their dates, which would pile them on the
+  last day.
+- Estimate the effect before looking: refunds lag 7 days on average, 7/90 is about 8%, and refunds fell 7%.
+  Chargebacks lag about 32 days, 32/90 is about 36%, and they fell 34%.
+- Before and after, max date: refunds 2026-10-14 → 2026-09-30, chargebacks 2026-11-27 → 2026-09-30.
+- After reloading raw data, every environment needs a full refresh, including CI. CI failed on the row-count test
+  for `fct_transactions` because its tables were left from earlier runs and mixed old and new data.
+- Reading a failed CI log: one real failure. The 28 skips and the cancels were `--fail-fast`.
+- Honest incremental number for `fct_merchant_daily_revenue`: 443 KiB against a full build of 4.7 MiB. The
+  earlier 1.1 KiB was the window sitting on nearly empty days.
+- An incremental filter only saves bytes on sources partitioned on the filter column.
+
+### State at end of day
+- Staging 5, intermediate 1, marts 3, 1 snapshot, 138 tests, 6 PRs merged, CI green.
+- Next: README, make the repo public, then orchestration.

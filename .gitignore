@@ -8,4 +8,4 @@ __pycache__/
 .env
 data/
 *.tgz
-.DS_store
+.DS_Store

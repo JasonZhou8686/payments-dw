@@ -5,8 +5,8 @@ payments_dw:
     dev:
       type: bigquery
       method: service-account
-      keyfile: /Users/jasonzhou/.gcp/dbt-runner.json
-      project: payments-dw
+      keyfile: /Users/YOUR_USERNAME/.gcp/dbt-runner.json   # full path, no ~
+      project: YOUR_PROJECT_ID
       dataset: dbt_jason
       threads: 4
       location: US

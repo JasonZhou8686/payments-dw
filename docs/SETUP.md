@@ -1,20 +1,75 @@
 # Setup
 
-1. GCP project with billing or sandbox, BigQuery enabled. Service account `dbt-runner` with BigQuery Admin (personal
-   project only — prefer Data Editor + Job User in a real org). Key saved at `~/.gcp/dbt-runner.json`, `chmod 600`.
-2. `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
-3. `mkdir -p ~/.dbt && cp profiles.yml.example ~/.dbt/profiles.yml` — edit `project` and `keyfile`.
-4. Add to `~/.zshrc`:
+## Google Cloud
+1. Create a GCP project with BigQuery enabled. Note the project ID.
+2. Create a service account `dbt-runner` with two roles: **BigQuery Data Editor** and **BigQuery Job User**.
+3. Create a JSON key for it and save it outside the repo:
+   ```bash
+   mkdir -p ~/.gcp
+   mv ~/Downloads/<key-file>.json ~/.gcp/dbt-runner.json
+   chmod 600 ~/.gcp/dbt-runner.json
    ```
-   export GOOGLE_APPLICATION_CREDENTIALS=~/.gcp/dbt-runner.json
-   export GCP_PROJECT=<your-project-id>
-   ```
-5. `dbt deps && dbt debug` — all `[OK]`.
-6. `python scripts/generate_data.py --merchants 500 --days 90` — creates dataset `raw` and five tables.
-7. `dbt build` — builds the example staging model, snapshot, and runs tests.
-8. In BigQuery, open `raw.transactions` → Details: note it's partitioned and clustered. Run
-   `select count(*) from raw.transactions where date(created_at) = '2026-09-15'` and compare bytes processed with the
-   same query without the `where`.
 
-Optional: install the Google Cloud SDK (`brew install google-cloud-sdk`) so the agent skills can use `bq show --schema`.
-Then `gcloud auth activate-service-account --key-file ~/.gcp/dbt-runner.json` and `gcloud config set project $GCP_PROJECT`.
+## Local environment
+Python 3.12.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+mkdir -p ~/.dbt
+cp profiles.yml.example ~/.dbt/profiles.yml     # then edit project and keyfile in the dev target
+```
+
+Add to `~/.zshrc`, then open a new terminal:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=~/.gcp/dbt-runner.json
+export GCP_PROJECT=<your-project-id>
+```
+
+Check the connection:
+
+```bash
+dbt deps
+dbt debug
+```
+
+Every check should say `OK`.
+
+## Load data and build
+```bash
+python scripts/generate_data.py --merchants 500 --days 90
+dbt build
+```
+
+The loader creates the `raw` dataset with five tables. `dbt build` creates the staging, intermediate and marts
+datasets (prefixed with the dev dataset name, for example `dbt_jason_marts`), takes the merchant snapshot and
+runs all tests.
+
+After every reload of the raw data, rebuild from scratch:
+
+```bash
+dbt build --full-refresh
+```
+
+The transaction data is random on each load, and the incremental facts only rebuild the partitions inside their
+lookback window.
+
+To see the snapshot record changes, load again with an offset, which changes the plan or status of some merchants:
+
+```bash
+python scripts/generate_data.py --merchants 500 --days 90 --day-offset 7
+dbt build --full-refresh
+```
+
+## CI
+The workflow in `.github/workflows/dbt_ci.yml` runs on every pull request. It needs two repository secrets:
+
+- `GCP_PROJECT`: the project ID
+- `GCP_SA_KEY`: the full contents of the service account key file
+
+## Coding agent (optional)
+Install Claude Code and start it from the repo root so it loads `CLAUDE.md` and the skills in `.claude/skills/`.
+The skills run `dbt` commands, so activate the virtual environment first.
