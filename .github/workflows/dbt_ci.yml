@@ -21,7 +21,7 @@ jobs:
         run: cp profiles.yml.example profiles.yml
       - run: dbt deps
       - run: dbt debug --target ci
-      - run: dbt build --target ci --fail-fast
+      - run: dbt build --target ci --full-refresh --fail-fast
       - name: Remove key
         if: always()
         run: rm -f sa.json
