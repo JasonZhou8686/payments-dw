@@ -361,6 +361,8 @@ def main():
     if args.date:
         if args.date < SIM_START.date():
             raise SystemExit(f"--date must be on or after SIM_START ({SIM_START.date()})")
+        if args.date >= datetime.now(timezone.utc).date():
+            raise SystemExit("--date must be a day that has already ended (UTC)")
         as_of = datetime.combine(args.date + timedelta(days=1), time.min)
         out = Path(args.out)
 
