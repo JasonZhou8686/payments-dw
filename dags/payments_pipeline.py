@@ -22,8 +22,7 @@ with DAG(
     dag_id="payments_pipeline",
     description="Load raw payments data, then dbt build",
     schedule=CronDataIntervalTimetable("@daily", timezone="UTC"),                      # runs daily
-    start_date=datetime(2026, 7, 3),
-    end_date=datetime(2026, 9, 30),    # temporary: no scheduled runs past the backfilled range
+    start_date=datetime(2026, 11, 15),
     catchup=False,
     max_active_runs=1,
     tags=["payments", "dbt"],
