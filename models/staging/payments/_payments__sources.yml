@@ -7,19 +7,19 @@ sources:
     schema: raw
     loader: generate_data.py
     config:
-      loaded_at_field: created_at
       freshness:
         warn_after: {count: 2, period: day}
         error_after: {count: 7, period: day}
     tables:
       - name: merchants
         description: One row per merchant, current state only. Snapshotted in snapshots/ for history.
-        config:
-          loaded_at_field: updated_at
+        # no loaded_at_field: replaced whole every day, so freshness uses the table's
         columns:
           - name: merchant_id
             tests: [unique, not_null]
       - name: transactions
+        config:
+          loaded_at_field: created_at
         description: >
           Card transactions. Partitioned by DATE(created_at), clustered by merchant_id.
           Nested `card` STRUCT and repeated `line_items`.
@@ -27,8 +27,11 @@ sources:
           - name: transaction_id
             tests: [unique, not_null]
       - name: refunds
-      - name: chargebacks
         config:
-          loaded_at_field: opened_at
+          loaded_at_field: created_at
+      - name: chargebacks
+        # no loaded_at_field: replaced whole every day, see merchants 
       - name: payouts
+        config:
+          loaded_at_field: created_at
         description: Daily settlement per merchant.

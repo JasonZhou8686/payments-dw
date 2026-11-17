@@ -28,3 +28,6 @@ models:
 snapshots:
   payments_dw:
     +target_schema: snapshots
+
+flags: 
+  bigquery_use_batch_source_freshness: false
