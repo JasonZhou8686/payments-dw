@@ -5,7 +5,7 @@ and to practise working with an AI coding agent under written rules.
 
 The business is made up: a card-payments processor whose merchants take transactions, issue refunds,
 receive chargebacks and get paid out. The data is synthetic: 500 merchants who sign up over time, loaded one
-day at a time from July 3, 2026, at roughly 750 to 1,600 transactions a day. The engineering is meant to be
+day at a time from July 3, 2026, at 748 to 1,990 transactions a day. The engineering is meant to be
 real: layered models, tests on every model, incremental partitioned facts, a scheduled daily pipeline, pull
 requests and CI.
 
