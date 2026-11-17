@@ -203,3 +203,70 @@
 ### State at end of day
 - Staging 5, intermediate 1, marts 3, 1 snapshot, 138 tests, 6 PRs merged, CI green.
 - Next: README, make the repo public, then orchestration.
+
+## Day 6 — 2026-11-12 to 2026-11-16: Airflow, daily loads and a backfill
+
+### What I built
+- Airflow 3.4 running locally with `airflow standalone`, and a DAG `payments_pipeline` with two tasks:
+  `load_raw >> dbt_build`. First version ran by hand only. PR #9.
+- A loader that loads one day per run (`--init` once, then `--date D`), deterministic and safe to rerun.
+  ADR-0002.
+- A daily schedule, a backfill from July 4 to November 14, and the first run the scheduler started by itself on
+  November 16. PR #11.
+
+### Airflow
+- Two virtual environments: `.venv` for dbt and the loader, `.venv-airflow` only for `airflow` commands.
+  Airflow's dependencies clash with dbt's, so it's installed with the constraints file.
+- Config by environment variable is `AIRFLOW__SECTION__KEY`, with double underscores. I typed single underscores
+  and Airflow quietly used its default folder.
+- `{{ ds }}` is the run's logical date. `airflow tasks render` shows the command with the date filled in, without
+  running anything.
+- In Airflow 3, `schedule="@daily"` runs *for* the day it starts. `CronDataIntervalTimetable("@daily")` gives each
+  run a whole day that has already ended, like Airflow 2 did. This has to be chosen on purpose.
+- Run IDs are named after when the run may start, not the day it loads: `backfill__2026-07-05` loads July 4. The
+  UI shows times in local time, so midnight UTC on Nov 16 shows as Nov 15 18:00.
+- `airflow backfill create` only creates the runs. The scheduler runs them, and it won't run anything for a paused
+  DAG. I set `end_date` so unpausing didn't also schedule today.
+- `max_active_runs=1` keeps the days in order, which the incremental lookback windows depend on.
+- `catchup=False` runs only the latest missed day. Older gaps need a backfill.
+- Airflow keeps one scheduled run per logical date. A bad run holds its date until you clear it.
+
+### Idempotent and deterministic loads
+- Idempotent: each day is loaded with `WRITE_TRUNCATE` into a partition decorator (`transactions$20260703`).
+  Loading July 3 twice gave 748 rows and 748 distinct IDs both times.
+- Deterministic: one random generator per merchant and day, seeded from a hash of the two. No global `random`,
+  no `uuid4`, Faker seeded. Every value is drawn first and filtered by the as-of time after, so a later run draws
+  the same numbers for the same day.
+- Events that never change (transactions, refunds, payouts) go into day partitions. Chargebacks and merchants
+  change after they're first loaded, so each run replaces them whole. Event vs record decides the load method.
+- Before loading anything to BigQuery, checked 29 local daily runs: every reference resolves, the chargeback
+  snapshot only grows, and no ID appears on two days.
+
+### Mistakes and lessons
+- The first scheduled run loaded a day that hadn't ended: old `@daily` semantics, and a DAG I thought was
+  paused. The relationships tests caught it, 727 chargebacks pointing at transactions that were never loaded.
+  Fixes: the interval timetable, and the loader now refuses any date that hasn't ended in UTC.
+- I copied the error message along with the check above it. The check worked and the message was wrong. An error
+  message has to describe the check that raised it.
+- A VS Code tab still showed the old loader after the agent rewrote the file. Saving it would have put the old
+  version back. The file on disk is what runs, and `git diff` shows what's on disk.
+- A task died with exit code -15 (SIGTERM) because the Mac went to sleep. Rerunning it was safe because the load
+  is idempotent. Added 2 retries, and ran the long backfill under `caffeinate -i` with the lid open.
+- `load_raw` had finished before the kill, and July 4 was complete in raw. BigQuery load jobs are atomic, so a
+  partition is either all there or not there.
+- After pushing the branch I switched to `main`, which still had the old DAG with no schedule, and Airflow
+  started running that. Airflow runs whatever is checked out in `dags/`. Run it from `main`, after a merge.
+- The bad run from the first morning held the Nov 15 slot, so the scheduler never made another one. I only found
+  the gap by comparing `max(date)` in raw and in `fct_transactions`. Cleared the run and it loaded Nov 15.
+
+### Numbers
+- July 3 to September 30: 90 days, 104,765 transactions in both raw and `fct_transactions`, and 99,995 approved
+  in both the fact and the daily table. Fewer than the old 142,600 because merchants now only trade after they
+  sign up.
+- The weekend shows up: Friday July 3 had 748 transactions, Saturday and Sunday about 1,000, Monday 814.
+- A daily run takes under 2 minutes: about 20 seconds to load, 90 seconds for `dbt build`.
+
+### State at end of day
+- July 3 to November 16 loaded, one run per day. `dbt test` 138/138.
+- The DAG runs every day at midnight UTC (18:00 Calgary) while `airflow standalone` is running.
+- Next: freshness checks and what happens when a test fails, then containers.
