@@ -4,14 +4,17 @@ A small payments data warehouse on **BigQuery and dbt**, built to learn the stac
 and to practise working with an AI coding agent under written rules.
 
 The business is made up: a card-payments processor whose merchants take transactions, issue refunds,
-receive chargebacks and get paid out. The data is synthetic (500 merchants, 90 days, about 143,000
-transactions). The engineering is meant to be real: layered models, tests on every model, incremental
-partitioned facts, pull requests and CI.
+receive chargebacks and get paid out. The data is synthetic: 500 merchants who sign up over time, loaded one
+day at a time from July 3, 2026, at roughly 750 to 1,600 transactions a day. The engineering is meant to be
+real: layered models, tests on every model, incremental partitioned facts, a scheduled daily pipeline, pull
+requests and CI.
 
 ## What's in it
 
 ```mermaid
 flowchart LR
+    af[Airflow: daily DAG] -.-> gen
+    af -.-> stg
     gen[generate_data.py] --> raw[("raw: 5 tables")]
     raw --> stg["staging: 5 views"]
     raw --> snap[merchants_snapshot]
@@ -26,7 +29,7 @@ flowchart LR
 
 | Layer | Models | Notes |
 |---|---|---|
-| Raw | `merchants`, `transactions`, `refunds`, `chargebacks`, `payouts` | Loaded by `scripts/generate_data.py`. Transactions have a nested `card` STRUCT and a repeated `line_items` array. |
+| Raw | `merchants`, `transactions`, `refunds`, `chargebacks`, `payouts` | Loaded one day at a time by `scripts/generate_data.py`. Transactions, refunds and payouts are partitioned by day. Transactions have a nested `card` STRUCT and a repeated `line_items` array. |
 | Staging | one `stg_payments__*` view per raw table | Rename and cast only. No joins, no business logic. |
 | Intermediate | `int_merchants__transaction_summary` | Approved-only lifetime activity per merchant. |
 | Marts | `dim_merchants` | One row per merchant, including those that never transacted. |
@@ -65,6 +68,17 @@ would drop the days that have a refund or chargeback but no sales. This data has
 **Tests guard decisions as well as data.** Row-count tests against staging protect the joins in `dim_merchants`
 and `fct_transactions` from dropping or duplicating rows. `not_null` on coalesced columns protects the coalesce. Business rules are tested where
 analysts read the data, for example `refunded_amount_cents <= amount_cents`.
+
+**Loads are daily, idempotent and deterministic.** `generate_data.py --date D` loads one day. Events that never
+change after they happen (transactions, refunds, payouts) overwrite partition D, so rerunning a day replaces it
+instead of adding to it. Chargebacks and merchants change after they are first loaded, so each run replaces
+those tables whole. The generator gives each merchant and day its own seeded random generator, so the same
+date always produces the same rows, and a chargeback loaded in September points at a transaction loaded in
+July. `docs/decisions/0002-daily-loads.md` has the reasoning.
+
+**Each run is for a day that has ended.** In Airflow 3, `schedule="@daily"` runs *for* the day it starts,
+which loaded a half-finished day on the first try. The DAG uses `CronDataIntervalTimetable`, so the run that
+starts at midnight UTC loads the day that just ended. The loader also refuses any date that has not ended.
 
 **Least privilege.** dbt runs as a service account with BigQuery Data Editor and Job User, not Admin.
 
@@ -112,6 +126,17 @@ Every pull request runs `dbt build --full-refresh` on GitHub Actions against a s
 builds from scratch on purpose. An earlier version reused tables left by previous runs, and after a data reload
 the row-count test caught a fact table that mixed old and new data.
 
+## Orchestration
+
+`dags/payments_pipeline.py` runs every day at midnight UTC: `load_raw` loads the day that just ended, then
+`dbt_build` builds and tests everything. Runs go one at a time, in date order, because the incremental models'
+lookback windows are measured from the latest partition already built. Each task retries twice.
+
+History was loaded with `airflow backfill create`, one run per day from July 4 to November 14, before the
+schedule went live on November 15. Along the way the pipeline loaded a day that had not ended, lost a task to
+the laptop going to sleep, and briefly ran an old DAG after a branch switch. `docs/learning-log.md` (Day 6)
+has what happened and how each was fixed.
+
 ## Run it
 
 You need a GCP project with BigQuery and a service account with BigQuery Data Editor and Job User.
@@ -124,13 +149,16 @@ cp profiles.yml.example ~/.dbt/profiles.yml     # edit project and keyfile
 export GOOGLE_APPLICATION_CREDENTIALS=~/.gcp/dbt-runner.json
 export GCP_PROJECT=<your-project-id>
 
-python scripts/generate_data.py --merchants 500 --days 90
 dbt deps
-dbt build
+python scripts/generate_data.py --init                 # once: create the empty raw tables
+python scripts/generate_data.py --date 2026-07-03      # load one day
+dbt build --full-refresh
 ```
 
-After reloading the raw data, run `dbt build --full-refresh`. Incremental tables keep partitions outside
-their lookback window, so they would otherwise mix old and new data.
+To load the rest on a schedule, run Airflow locally. The setup and the backfill command are in `docs/SETUP.md`.
+
+After `--init`, always run `dbt build --full-refresh`. Incremental tables keep partitions outside their
+lookback window, so they would otherwise mix old and new data.
 
 ## Known limits and what's next
 
@@ -138,12 +166,17 @@ their lookback window, so they would otherwise mix old and new data.
   updated if a merchant changes later. Join `dim_merchants` for current values. The fix is to drop them from
   the fact or use the snapshot for as-of values.
 - Chargebacks can arrive about 60 days after a sale and are not reflected in `fct_transactions`.
-- The raw refund and chargeback tables are not partitioned, so the incremental filter does not reduce what is
-  scanned from them.
+- The raw chargeback table is replaced whole every day and is not partitioned, so the incremental filter does
+  not reduce what is scanned from it.
+- Merchant plan and status no longer change in the generator, so the snapshot has nothing to record. Seeded
+  daily changes are the next generator change.
+- Airflow runs on a laptop with `airflow standalone` and reads the DAG from the working copy, so switching
+  branches changes the live pipeline. It also only runs while the laptop is on.
 - Authentication uses a service-account key file. Next step is impersonation for local work and Workload
   Identity Federation for CI, so no long-lived key exists.
 - CI rebuilds everything. A larger project would build only changed models in a schema per pull request.
-- Not built yet: orchestration (Airflow), ingestion (Airbyte) and running any of it on Kubernetes.
+- Not built yet: freshness checks and alerting in the DAG, ingestion (Airbyte), and running any of it in
+  containers on Kubernetes.
 
 ## Repo layout
 
@@ -154,7 +187,9 @@ models/marts/              dimension and fact tables
 snapshots/                 merchant history
 tests/                     business-rule tests written as SQL
 macros/                    cents_to_dollars, dataset naming
-scripts/generate_data.py   synthetic data loader
+scripts/generate_data.py   synthetic data loader (one day per run)
+scripts/airflow_env.sh     sets up a shell for Airflow commands
+dags/                      Airflow DAG
 specs/                     mart specs
 .claude/skills/            agent skills
 CLAUDE.md                  project conventions
